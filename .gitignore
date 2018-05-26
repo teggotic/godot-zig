@@ -1,0 +1,3 @@
+godot/*.zig
+.vscode/
+zig-cache/
