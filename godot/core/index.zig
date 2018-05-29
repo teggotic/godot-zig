@@ -25,7 +25,7 @@ fn GodotMethod(comptime T: type) type {
         extern fn wrapped(obj: ?&c.godot_object, data: ?&c_void, userdata: ?&c_void, num: c_int, args: ?&?&c.godot_variant) c.godot_variant {
             var result: c.godot_variant = undefined;
             var func = @ptrCast(T, @alignCast(@alignOf(T), data));
-            // TODO:
+            // TODO: cast arguments to proper types and call func
             return result;
         }
     };
