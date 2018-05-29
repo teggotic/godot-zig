@@ -152,7 +152,7 @@ def generate_method(class_name, method, has_base=True):
     source.append(') {0} {{'.format(return_type))
     source.append('''
     if ({0} == null) {{
-        {0} = godot.api.get_method(c"{1}", c"{2}");
+        {0} = godot.api.getMethod(c"{1}", c"{2}");
     }}
     '''.format(ptr_name, class_name, method['name']))
     source.append('var result: ?&c_void = null;\n')
@@ -199,7 +199,7 @@ def generate_obj(item):
         source.append('base: &Parent,')
     source.append('tmp: u8,')
     source.append('pub fn new() &Self {')
-    source.append('if ({0} == null) {{ {0} = godot.api.get_constructor(c"{1}"); }}'.format(method_name_to_ptr_name(name + 'constructor'), name))
+    source.append('if ({0} == null) {{ {0} = godot.api.getConstructor(c"{1}"); }}'.format(method_name_to_ptr_name(name + 'constructor'), name))
     source.append('return godot.api.newObj(Self, ??{0});'.format(method_name_to_ptr_name(name + 'constructor')))
     source.append('}')
     source.append('''pub fn destroy(self: &Self) void {

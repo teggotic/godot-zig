@@ -25,13 +25,13 @@ fn GodotMethod(comptime T: type) type {
         extern fn wrapped(obj: ?&c.godot_object, data: ?&c_void, userdata: ?&c_void, num: c_int, args: ?&?&c.godot_variant) c.godot_variant {
             var result: c.godot_variant = undefined;
             var func = @ptrCast(T, @alignCast(@alignOf(T), data));
-
+            // TODO:
             return result;
         }
     };
 }
 
-pub fn GodotFns(comptime T: type) type {
+fn GodotFns(comptime T: type) type {
     return extern struct {
         extern fn create(obj: ?&c.godot_object, data: ?&c_void) ?&c_void {
             var t: &T = std.heap.c_allocator.create(T) catch std.os.abort();
@@ -131,7 +131,7 @@ pub const GodotApi = struct {
         }
     }
 
-    pub fn get_method(self: &Self, classname: &const u8, method: &const u8) ?&c.godot_method_bind {
+    pub fn getMethod(self: &Self, classname: &const u8, method: &const u8) ?&c.godot_method_bind {
         if (self.core) |core| {
             return (??(core).godot_method_bind_get_method)(classname, method);
         } else {
@@ -140,7 +140,7 @@ pub const GodotApi = struct {
         return null;
     }
 
-    pub fn get_constructor(self: &Self, classname: &const u8) ?ConstructorFn {
+    pub fn getConstructor(self: &Self, classname: &const u8) ?ConstructorFn {
         if (self.core) |core| {
             var result = (??(core).godot_get_class_constructor)(classname);
             return @ptrCast(ConstructorFn, result);
