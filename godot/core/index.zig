@@ -11,10 +11,25 @@ const godot = @import("../index.zig");
 
 var memoryBuffer: [3000]u8 = undefined;
 
+pub const Options = c.godot_gdnative_init_options;
+pub const Handle = c_void;
+
+const MethodFn = extern fn(?&c.godot_object, data: ?&c_void, userdata: ?&c_void, num: c_int, args: ?&?&c.godot_variant) c.godot_variant;
 const CreateFn = extern fn(?&c.godot_object, ?&c_void) ?&c_void;
 const DestroyFn = extern fn(?&c.godot_object, ?&c_void, ?&c_void) void;
 const FreeFn = extern fn (?&c_void) void;
 const ConstructorFn = extern fn() ?&c.godot_object;
+
+fn GodotMethod(comptime T: type) type {
+    return extern struct { 
+        extern fn wrapped(obj: ?&c.godot_object, data: ?&c_void, userdata: ?&c_void, num: c_int, args: ?&?&c.godot_variant) c.godot_variant {
+            var result: c.godot_variant = undefined;
+            var func = @ptrCast(T, @alignCast(@alignOf(T), data));
+
+            return result;
+        }
+    };
+}
 
 pub fn GodotFns(comptime T: type) type {
     return extern struct {
@@ -56,8 +71,64 @@ pub const GodotApi = struct {
         return "";
     }
 
-    pub fn initNative(self: &Self, handle: &c_void) void {
+    fn getFns(comptime T: type) []FnInfo {
+        comptime {
+            const Info = @typeInfo(T);
+            var num: usize = 0;
+            // First get the number of functions so we can
+            // define a const-sized array
+            for (Info.Struct.defs) |def| {
+                if (def.is_pub) {
+                    switch (def.data) {
+                        TypeInfo.Definition.Data.Fn => |fndef| {
+                            if (fndef.is_export) {
+                                num += 1;
+                            }
+                        },
+                        else => {},
+                    }
+                }
+            }
+            
+            var result: [num]FnInfo = []FnInfo{} ** num;
+            var i: usize = 0;
+            for (Info.Struct.defs) |def| {
+                if (def.is_pub) {
+                    switch (def.data) {
+                        TypeInfo.Definition.Data.Fn => |fndef| {
+                            if (fndef.is_export) {
+                                result[i].t = @typeOf(@field(T, def.name));
+                                result[i].ptr = @ptrToInt(@field(T, def.name));
+                                result[i].name = def.name;
+                                i += 1;
+                            }
+                        },
+                        else => {}
+                    }
+                }
+            }
+
+            return result;
+        } 
+    }
+
+    pub fn initNative(self: &Self, handle: &Handle) void {
         self.handle = handle;
+    }
+
+    pub fn initCore(self: &Self, options: &Options) void {
+        api.core = options.api_struct;
+        var i = 0;
+        while (i < api.core.num_extensions) {
+            switch (api.core.extensions[i].type) {
+                c.GDNATIVE_EXT_NATIVESCRIPT => {
+                    var nativeApi = @ptrCast(&c.godot_gdnative_ext_nativescript_api_struct, api.extensions[i]);
+                    api.native = nativeApi;
+                },
+                    else => {}
+            }
+            i += 1;
+        }
     }
 
     pub fn get_method(self: &Self, classname: &const u8, method: &const u8) ?&c.godot_method_bind {
@@ -113,51 +184,38 @@ pub const GodotApi = struct {
         } else {
             std.debug.warn("NativeScript API hasn't been initialized!\n");
         }
-        // TODO: Register every function that is `pub` to Godot
+
+        // TODO: Register every function that is `pub export` to Godot
         // TODO: Look at T.Inspector const and register all fields with Godot Inspector
     }
 
-    pub fn registerMethod(self: &Self, comptime T: type, name: &const u8) void {
-        // TODO: Test if method name is godot built-in
-        // ready, init, process, physicsProcess, etc.
-        // Turn method name into godot built-in version
-        // ready -> _ready
-        // init -> _init
-        // process -> process
-        // physicsProcess -> _physics_process
+    pub fn registerMethod(self: &Self, comptime F: type, classname: &const u8, methodname: &const u8, func: F) void {
+        var attributes = c.godot_method_attributes {
+            .rpc_type = (c.godot_method_rpc_mode)(c.GODOT_METHOD_RPC_MODE_DISABLED)
+        };
+        const Method = GodotMethod(F);
+        const wrapped: ?MethodFn = Method.wrapped;
+        var mfn: ?&const c_void = @ptrCast(&const c_void, func);
+        var data = c.godot_instance_method {
+            .method = wrapped,
+            .method_data = mfn, 
+            .free_func = null,
+        };
+        (??(??self.native).godot_nativescript_register_method)(self.handle, classname, methodname, attributes, data);
     }
 };
 
 pub var api: GodotApi = GodotApi.new();
 
-extern fn godot_gdnative_init(options: &c.godot_gdnative_init_options) void {
-    var api = options.api_struct;
-    var i = 0;
-    while (i < api.num_extensions) {
-        switch (api.extensions[i].type) {
-            c.GDNATIVE_EXT_NATIVESCRIPT => {
-                var nativeApi = @ptrCast(&c.godot_gdnative_ext_nativescript_api_struct, api.extensions[i]);
-                api.native = nativeApi;
-            },
-            else => {}
-        }
-        i += 1;
-    }
-}
-
-extern fn godot_nativescript_init(handle: &c_void) void {
-    api.handle = handle;
-}
-
-const Derp = struct {
-    const Parent = godot.Node2D;
-    base: &Parent,
-    tmp: u8,
-};
-
 test "register class" {
     const Obj = struct {
         b: i32,
+    };
+
+    const Derp = struct {
+        const Parent = godot.Node2D;
+        base: &Parent,
+        tmp: u8,
     };
 
     const Test = struct {
@@ -178,4 +236,5 @@ test "register class" {
     //_ = godot.Resource.getPath(resource);
 
     try api.registerClass(Test);
+    api.registerMethod(@typeOf(Test.init), c"Test", c"init", Test.init);
 }
