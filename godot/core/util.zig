@@ -6,8 +6,17 @@ pub fn Array(comptime T: type, comptime size: usize) type {
     return [size]T;
 }
 
-pub fn hasField(comptime T: type, comptime name: []const u8) ?T {
+pub fn hasField(comptime T: type, comptime name: []const u8) bool {
     comptime {
+        if (getField(T, name)) |field| {
+            return true;
+        }
+        return false;
+    }
+}
+
+pub fn getField(comptime T: type, comptime name: []const u8) ?T {
+    comptime { 
         if (@typeId(T) != TypeId.Struct) return null;
         for (@typeInfo(T).Struct.fields) |field| {
             if (std.mem.eql(u8, name, field.name)) {

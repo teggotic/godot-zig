@@ -14,18 +14,61 @@ var memoryBuffer: [3000]u8 = undefined;
 pub const Options = c.godot_gdnative_init_options;
 pub const Handle = c_void;
 
-const MethodFn = extern fn(?&c.godot_object, data: ?&c_void, userdata: ?&c_void, num: c_int, args: ?&?&c.godot_variant) c.godot_variant;
+const WrapperFn = extern fn(?&c.godot_object, ?&c_void, ?&c_void, c_int, ?&?&c.godot_variant) c.godot_variant;
 const CreateFn = extern fn(?&c.godot_object, ?&c_void) ?&c_void;
 const DestroyFn = extern fn(?&c.godot_object, ?&c_void, ?&c_void) void;
 const FreeFn = extern fn (?&c_void) void;
 const ConstructorFn = extern fn() ?&c.godot_object;
 
-fn GodotMethod(comptime T: type) type {
+fn GodotWrapper(comptime T: type) type {
     return extern struct { 
-        extern fn wrapped(obj: ?&c.godot_object, data: ?&c_void, userdata: ?&c_void, num: c_int, args: ?&?&c.godot_variant) c.godot_variant {
+        extern fn wrapped(obj: ?&c.godot_object, data: ?&c_void, userdata: ?&c_void, num: c_int, cargs: ?&?&c.godot_variant) c.godot_variant {
             var result: c.godot_variant = undefined;
-            var func = @ptrCast(T, @alignCast(@alignOf(T), data));
-            // TODO: cast arguments to proper types and call func
+            // TODO: Figure out how to turn array into varargs while casting each
+            // argument into the proper type for the function call
+            // Refer to how godot_cpp does this.
+            const Info = @typeInfo(T);
+            const Args = Info.Fn.args;
+            var args = (??cargs)[0..usize(num)];
+            var func = @ptrCast(T, data);
+            switch (Args.len) {
+                0 => {
+                    _ = func();
+                },
+                1 => {
+                    // TODO: godot_variant can't directly be casted
+                    // If the variant is an object use godot_nativescript_get_userdata
+                    var arg0 = @ptrCast(Args[0].arg_type, @alignCast(@alignOf(Args[0].arg_type), args[0]));
+                    _ = func(arg0);
+                },
+                2 => { 
+                    var arg0 = @ptrCast(Args[0].arg_type, @alignCast(@alignOf(Args[0].arg_type), args[0]));
+                    var arg1 = @ptrCast(Args[1].arg_type, @alignCast(@alignOf(Args[1].arg_type), args[1]));
+                    _ = func(arg0, arg1);
+                },
+                3 => {
+                    var arg0 = @ptrCast(Args[0].arg_type, @alignCast(@alignOf(Args[0].arg_type), args[0]));
+                    var arg1 = @ptrCast(Args[1].arg_type, @alignCast(@alignOf(Args[1].arg_type), args[1]));
+                    var arg2 = @ptrCast(Args[2].arg_type, @alignCast(@alignOf(Args[2].arg_type), args[2]));
+                    _ = func(arg0, arg1, arg2);
+                },
+                4 => { 
+                    var arg0 = @ptrCast(Args[0].arg_type, @alignCast(@alignOf(Args[0].arg_type), args[0]));
+                    var arg1 = @ptrCast(Args[1].arg_type, @alignCast(@alignOf(Args[1].arg_type), args[1]));
+                    var arg2 = @ptrCast(Args[2].arg_type, @alignCast(@alignOf(Args[2].arg_type), args[2]));
+                    var arg3 = @ptrCast(Args[3].arg_type, @alignCast(@alignOf(Args[3].arg_type), args[3]));
+                    _ = func(arg0, arg1, arg2, arg3);
+                },
+                5 => { 
+                    var arg0 = @ptrCast(Args[0].arg_type, @alignCast(@alignOf(Args[0].arg_type), args[0]));
+                    var arg1 = @ptrCast(Args[1].arg_type, @alignCast(@alignOf(Args[1].arg_type), args[1]));
+                    var arg2 = @ptrCast(Args[2].arg_type, @alignCast(@alignOf(Args[2].arg_type), args[2]));
+                    var arg3 = @ptrCast(Args[3].arg_type, @alignCast(@alignOf(Args[3].arg_type), args[3]));
+                    var arg4 = @ptrCast(Args[4].arg_type, @alignCast(@alignOf(Args[4].arg_type), args[4]));
+                    _ = func(arg0, arg1, arg2, arg3, arg4);
+                },
+                else => {}
+            }
             return result;
         }
     };
@@ -36,7 +79,9 @@ fn GodotFns(comptime T: type) type {
         extern fn create(obj: ?&c.godot_object, data: ?&c_void) ?&c_void {
             var t: &T = std.heap.c_allocator.create(T) catch std.os.abort();
             t.base = @ptrCast(&T.Parent, @alignCast(@alignOf(T.Parent), ??obj));
-            t.init();
+            if (util.hasField(T, "init")) {
+                t.init();
+            }
             return @ptrCast(&c_void, t);
         }
 
@@ -53,7 +98,7 @@ pub const GodotApi = struct {
     heap: std.heap.FixedBufferAllocator,
     native: ?&NativeApi,
     core: ?&CoreApi, 
-    handle: ?&c_void,
+    handle: ?&Handle,
 
     fn new() Self {
         return Self {
@@ -65,7 +110,7 @@ pub const GodotApi = struct {
     }
 
     fn getBaseClassName(comptime T: type) []const u8 {
-        if (util.hasField(T, "Parent")) |field| {
+        if (util.getField(T, "Parent")) |field| {
             return @typeName(@typeOf(field));
         }
         return "";
@@ -112,10 +157,12 @@ pub const GodotApi = struct {
         } 
     }
 
+    /// This needs to be called in `export godot_nativescript_init(handle: &c_void) void`
     pub fn initNative(self: &Self, handle: &Handle) void {
         self.handle = handle;
     }
 
+    /// This needs to be called in `export godot_gdnative_init(options: &godot.Options) void`
     pub fn initCore(self: &Self, options: &Options) void {
         api.core = options.api_struct;
         var i = 0;
@@ -154,13 +201,14 @@ pub const GodotApi = struct {
         return @ptrCast(&T, @alignCast(@alignOf(&T), constructor()));
     }
 
-    pub fn registerClass(self: &Self, comptime T: type) !void {
+    pub fn registerClass(self: &Self, comptime T: type) void {
         const Name = @typeName(T);
         const BaseName = getBaseClassName(T);
-
-        var name = try std.cstr.addNullByte(&self.heap.allocator, Name);
+        
+        // TODO: Tell user that we ran into an error before aborting
+        var name = std.cstr.addNullByte(&self.heap.allocator, Name) catch std.os.abort();
         defer self.heap.allocator.free(name);
-        var base = try std.cstr.addNullByte(&self.heap.allocator, BaseName);
+        var base = std.cstr.addNullByte(&self.heap.allocator, BaseName) catch std.os.abort();
         defer self.heap.allocator.free(base);
         
         const Fns = GodotFns(T);
@@ -185,39 +233,38 @@ pub const GodotApi = struct {
             std.debug.warn("NativeScript API hasn't been initialized!\n");
         }
 
-        // TODO: Register every function that is `pub export` to Godot
+        // TODO: Register every function that is `pub` to Godot
         // TODO: Look at T.Inspector const and register all fields with Godot Inspector
     }
 
     pub fn registerMethod(self: &Self, comptime F: type, classname: &const u8, methodname: &const u8, func: F) void {
         var attributes = c.godot_method_attributes {
+            // TODO: Support different method attributes
             .rpc_type = (c.godot_method_rpc_mode)(c.GODOT_METHOD_RPC_MODE_DISABLED)
         };
-        const Method = GodotMethod(F);
-        const wrapped: ?MethodFn = Method.wrapped;
+        
+        // create a wrapper function
+        const Wrapper = GodotWrapper(F);
+        const wrapped: ?WrapperFn = Wrapper.wrapped;
+    
         var mfn: ?&const c_void = @ptrCast(&const c_void, func);
         var data = c.godot_instance_method {
             .method = wrapped,
             .method_data = mfn, 
             .free_func = null,
         };
-        (??(??self.native).godot_nativescript_register_method)(self.handle, classname, methodname, attributes, data);
+
+        if (self.native) |native| {
+            (??(native).godot_nativescript_register_method)(self.handle, classname, methodname, attributes, data);
+        } else {
+            std.debug.warn("NativeScript API hasn't been initialized!\n");
+        }
     }
 };
 
 pub var api: GodotApi = GodotApi.new();
 
 test "register class" {
-    const Obj = struct {
-        b: i32,
-    };
-
-    const Derp = struct {
-        const Parent = godot.Node2D;
-        base: &Parent,
-        tmp: u8,
-    };
-
     const Test = struct {
         const Self = this;
         const Parent = godot.Node2D;
@@ -226,15 +273,12 @@ test "register class" {
 
         fn init(self: &Self) void {
         }
+
+        fn derp() void {
+        }
     };
 
-    var r: ?Derp = null;
-    var v: &c_void = @ptrCast(&c_void, &r);
-    var r2 = @ptrCast(&Derp, @alignCast(@alignOf(&Derp), v)).*;
-
-    var resource: &godot.Resource = godot.Resource.new();
-    //_ = godot.Resource.getPath(resource);
-
-    try api.registerClass(Test);
+    api.registerClass(Test);
     api.registerMethod(@typeOf(Test.init), c"Test", c"init", Test.init);
+    api.registerMethod(@typeOf(Test.derp), c"Test", c"derp", Test.derp);
 }
