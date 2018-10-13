@@ -39,7 +39,7 @@ pub fn getDef(comptime T: type, comptime name: []const u8) bool {
     }
 }
 
-pub fn as(comptime T: type, t: var) ?&T {
+pub fn as(comptime T: type, t: var) ?*T {
     comptime {
         var current = @typeOf(t);
         if (current == T) {

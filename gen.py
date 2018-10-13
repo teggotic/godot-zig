@@ -140,13 +140,13 @@ def generate_method(class_name, method, has_base=True):
     source = []
     method_name = name_to_zig_var(method['name'])
     return_type, is_struct = type_to_zig_type(method['return_type'])
-    source.append('pub fn {0}(self: &const Self'.format(method_name))
+    source.append('pub fn {0}(self: *const Self'.format(method_name))
     args_len = len(method['arguments'])
     for i, arg in enumerate(method['arguments']):
         if i + 1 <= args_len:
             source.append(', ')
         tname, is_struct = type_to_zig_type(arg['type'])
-        struct = '&const ' if is_struct else ''
+        struct = '*const ' if is_struct else ''
         source.append('{0}: {1} {2}'.format(escape_zig_name(arg['name']), struct, tname))
     ptr_name = method_name_to_ptr_name(class_name + method_name)
     source.append(') {0} {{'.format(return_type))
@@ -155,22 +155,22 @@ def generate_method(class_name, method, has_base=True):
         {0} = godot.api.getMethod(c"{1}", c"{2}");
     }}
     '''.format(ptr_name, class_name, method['name']))
-    source.append('var result: ?&c_void = null;\n')
+    source.append('var result: ?*c_void = null;\n')
     if args_len > 0:
         for i, arg in enumerate(method['arguments']):
             _, is_struct = type_to_zig_type(arg['type'])
-            struct = '' if is_struct else '&'
-            source.append('    var arg{0}: ?&const c_void = @ptrCast(&const c_void, {1}{2});\n'.format(i, struct, escape_zig_name(arg['name'])))
-        source.append('    var args: [{0}]?&const c_void = []?&const c_void {{'.format(args_len))
+            struct = '' if is_struct else '*'
+            source.append('    var arg{0}: ?*const c_void = @ptrCast(*const c_void, {1}{2});\n'.format(i, struct, escape_zig_name(arg['name'])))
+        source.append('    var args: [{0}]?*const c_void = []?*const c_void {{'.format(args_len))
         for i, arg in enumerate(method['arguments']):
             source.append('arg{0},'.format(i))
-        source.append('''};\n    var cargs: ?&?&const c_void = &args[0];\n''')
+        source.append('''};\n    var cargs: ?*?*const c_void = &args[0];\n''')
     else:
-        source.append('    var cargs: ?&?&const c_void = null;\n')
-    base = '@ptrCast(&c.godot_object, @alignCast(@alignOf(&c.godot_object), self.base))' if has_base else 'null'
-    source.append('    _ = (??(??godot.api.core).godot_method_bind_ptrcall)({0}, {1}, cargs, result);\n'.format(ptr_name, base))
+        source.append('    var cargs: ?*?*const c_void = null;\n')
+    base = '@ptrCast(*c.godot_object, @alignCast(@alignOf(*c.godot_object), self.base))' if has_base else 'null'
+    source.append('    _ = godot.api.core.?.godot_method_bind_ptrcall.?({0}, {1}, cargs, result);\n'.format(ptr_name, base))
     if return_type != 'void':
-        source.append('    return @ptrCast(&{0}, @alignCast(@alignOf(&{0}), result)).*;\n'.format(return_type))
+        source.append('    return @ptrCast(*{0}, @alignCast(@alignOf(&{0}), result)).*;\n'.format(return_type))
     source.append('}')
     return ''.join(source)
 
@@ -188,22 +188,22 @@ def generate_obj(item):
     for method in item['methods']:
         if method['is_virtual']:
             continue
-        source.append('var {0}: ?&c.godot_method_bind = null;'.format(method_name_to_ptr_name(name + name_to_zig_var(method['name']))))
-    source.append('var {0}: ?extern fn() ?&c.godot_object = null;'.format(method_name_to_ptr_name(name + 'constructor')))
+        source.append('var {0}: ?*c.godot_method_bind = null;'.format(method_name_to_ptr_name(name + name_to_zig_var(method['name']))))
+    source.append('var {0}: ?extern fn() ?*c.godot_object = null;'.format(method_name_to_ptr_name(name + 'constructor')))
     source.append('\n//End function pointers\npub const {0} = struct {{'.format(name))
     if item['base_class'] != '':
         source.append('const Parent = {0};'.format(item['base_class']))
-    source.append('const Self = this;')
+    source.append('const Self = @This();')
     # after constants
     if item['base_class'] != '':
-        source.append('base: &Parent,')
+        source.append('base: *Parent,')
     source.append('tmp: u8,')
-    source.append('pub fn new() &Self {')
+    source.append('pub fn new() *Self {')
     source.append('if ({0} == null) {{ {0} = godot.api.getConstructor(c"{1}"); }}'.format(method_name_to_ptr_name(name + 'constructor'), name))
-    source.append('return godot.api.newObj(Self, ??{0});'.format(method_name_to_ptr_name(name + 'constructor')))
+    source.append('return godot.api.newObj(Self, {0}.?);'.format(method_name_to_ptr_name(name + 'constructor')))
     source.append('}')
-    source.append('''pub fn destroy(self: &Self) void {
-        _ = (??(??godot.api.core).godot_object_destroy)(@ptrCast(&c.godot_object, self));
+    source.append('''pub fn destroy(self: *Self) void {
+        _ = godot.api.core.?.godot_object_destroy.?(@ptrCast(*c.godot_object, self));
     }''')
     for method in item['methods']:
         if method['is_virtual']:
